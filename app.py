@@ -52,14 +52,42 @@ app.secret_key = SECRET_KEY
 
 # Initialize database tables on app startup (critical for production)
 # This ensures tables exist when running with gunicorn
-with app.app_context():
-    try:
-        db.create_all()
-        print("✓ Database tables initialized successfully!")
-    except Exception as e:
-        print(f"✗ Error initializing database tables: {e}")
-        import traceback
-        traceback.print_exc()
+def initialize_database():
+    """Initialize database tables - called on app startup"""
+    with app.app_context():
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Create all tables defined by SQLAlchemy models
+                db.create_all()
+                print("✓ Database tables initialized successfully!")
+                
+                # Verify table exists
+                from sqlalchemy import inspect
+                inspector = inspect(db.engine)
+                tables = inspector.get_table_names()
+                if 'new_user_creds' in tables:
+                    print("✓ Verified 'new_user_creds' table exists")
+                    return True
+                else:
+                    print(f"⚠ Warning: 'new_user_creds' table not found after creation (attempt {attempt + 1}/{max_retries})")
+                    print(f"  Available tables: {tables}")
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1)  # Wait 1 second before retry
+            except Exception as e:
+                print(f"✗ Error initializing database tables (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(1)  # Wait 1 second before retry
+                else:
+                    import traceback
+                    traceback.print_exc()
+                    print("⚠ Failed to initialize database tables after retries. App will continue but may have issues.")
+        return False
+
+# Initialize on startup
+initialize_database()
 
 
 # Create database if it doesn't exist (for local PostgreSQL only)
@@ -183,20 +211,16 @@ def signup_page():
             name = data.get("given_name")
             google_id = data.get("sub")
 
-            # Check for existing email
-            if cursor:
-                try:
-                    cursor.execute('SELECT email FROM public.new_user_creds WHERE email = %s', (email,))
-                    existing_email = cursor.fetchone()
-                except Exception as e:
-                    print(f"Database query error: {e}")
-                    return jsonify({"success": False, "error": f"Database error: {str(e)}"})
-            else:
-                print("✗ Database cursor is None - connection failed")
-                flash('Database connection error. Please check PostgreSQL setup.', 'error')
-                return jsonify({"success": False, "error": "Database not available"})
+            # Check for existing email using SQLAlchemy (no raw cursor)
+            try:
+                existing_user = UserCreds.query.filter_by(email=email).first()
+            except Exception as e:
+                print(f"Database query error: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({"success": False, "error": f"Database error: {str(e)}"})
 
-            if existing_email is not None and email == existing_email[0]:
+            if existing_user is not None:
                 # flash('USER ALREADY EXISTS!', 'error')
                 # Construct absolute URL using request
                 redirect_url = url_for('user_endpoint', username=name, _external=True)
@@ -225,22 +249,17 @@ def signup_page():
             unhashed_password = request.form.get("password")
             password = bcrypt.generate_password_hash(unhashed_password).decode('utf-8')
 
-            # Check for existing email
-            if cursor:
-                try:
-                    cursor.execute("SELECT email FROM public.new_user_creds WHERE email = %s", (email,))
-                    existing_email = cursor.fetchone()
-                except Exception as e:
-                    print(f"Database query error: {e}")
-                    flash(f'Database error: {str(e)}', 'error')
-                    return redirect(url_for('signup_page'))
-            else:
-                print("✗ Database cursor is None - connection failed")
-                flash('Database connection error. Please check PostgreSQL setup.', 'error')
+            # Check for existing email using SQLAlchemy (no raw cursor)
+            try:
+                existing_user = UserCreds.query.filter_by(email=email).first()
+            except Exception as e:
+                print(f"Database query error: {e}")
+                import traceback
+                traceback.print_exc()
+                flash(f'Database error: {str(e)}', 'error')
                 return redirect(url_for('signup_page'))
-            # print(existing_email is not None, existing_email[0], email)
 
-            if existing_email is not None and email == existing_email[0]:
+            if existing_user is not None:
                 flash("USER ALREADY EXISTS!", "error")
                 return redirect(url_for('signup_page'))
             else:
@@ -489,17 +508,26 @@ def show_database(username):
 
     email = user.email
     data_name = f"{email.replace('@', '_').replace('.', '_')}_data"
-    query = f"SELECT * FROM public.{data_name}"
-    if not cursor:
-        return "Database connection error. Please check PostgreSQL setup.", 500
-    cursor.execute(query)
-    result = cursor.fetchall()
+    
+    # Use SQLAlchemy instead of raw cursor for better transaction handling
+    try:
+        table_model = create_db_table(email)
+        chat_history = table_model.query.all()
+        
+        output = []
+        for row in chat_history:
+            output.append({
+                'prompt': row.prompt,
+                'responses': row.responses,
+                'timestamp': row.timestamp
+            })
+    except Exception as e:
+        print(f"Error fetching database: {e}")
+        import traceback
+        traceback.print_exc()
+        output = []
+    
     timestamp = datetime.now()
-
-    output = []
-    for row in result:
-        output.append({'prompt': row[1], 'responses': row[2], 'timestamp': row[4]})
-
     return render_template('db.html', output=output, username=username, timestamp=timestamp)
 
 
