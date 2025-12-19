@@ -97,15 +97,24 @@
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify(responsePayload)
-            }).then(response => response.json())
+            }).then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
               .then(data => {
-                  if (data.success) {
+                  console.log("Response data:", data);
+                  if (data.success && data.redirect_url) {
+                      console.log("Redirecting to:", data.redirect_url);
                       window.location.href = data.redirect_url;
                   } else {
-                      console.error("Google login failed");
+                      console.error("Google login failed:", data);
+                      alert("Login failed. Please try again.");
                   }
               }).catch(error => {
                   console.error("Error:", error);
+                  alert("An error occurred. Please try again.");
               });
         }
 

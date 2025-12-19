@@ -198,7 +198,12 @@ def signup_page():
 
             if existing_email is not None and email == existing_email[0]:
                 # flash('USER ALREADY EXISTS!', 'error')
-                return jsonify({"success": True, "redirect_url": url_for('user_endpoint', username=name)})
+                # Construct absolute URL using request
+                redirect_url = url_for('user_endpoint', username=name, _external=True)
+                if not redirect_url.startswith('http'):
+                    # Fallback if _external doesn't work
+                    redirect_url = f"{request.scheme}://{request.host}{url_for('user_endpoint', username=name)}"
+                return jsonify({"success": True, "redirect_url": redirect_url})
             else:
                 cred_table = UserCreds(name=name, email=email, google_id=google_id)
                 db.session.add(cred_table)
@@ -208,7 +213,12 @@ def signup_page():
                 create_user_table(email)
 
                 flash('Login Successful!', 'success')
-                return jsonify({"success": True, "redirect_url": url_for('user_endpoint', username=name)})
+                # Construct absolute URL using request
+                redirect_url = url_for('user_endpoint', username=name, _external=True)
+                if not redirect_url.startswith('http'):
+                    # Fallback if _external doesn't work
+                    redirect_url = f"{request.scheme}://{request.host}{url_for('user_endpoint', username=name)}"
+                return jsonify({"success": True, "redirect_url": redirect_url})
         else:
             name = request.form.get("name")
             email = request.form.get("email")
@@ -258,10 +268,18 @@ def login_page():
             if user is not None and email == user.email:
                 username = user.name
                 flash('Login Successful!', 'error')
-                return jsonify({"success": True, "redirect_url": url_for('user_endpoint', username=username)})
+                # Construct absolute URL using request
+                redirect_url = url_for('user_endpoint', username=username, _external=True)
+                if not redirect_url.startswith('http'):
+                    # Fallback if _external doesn't work
+                    redirect_url = f"{request.scheme}://{request.host}{url_for('user_endpoint', username=username)}"
+                return jsonify({"success": True, "redirect_url": redirect_url})
             elif user is None:
                 flash('USER NOT FOUND!', 'error')
-                return jsonify({"success": True, "redirect_url": url_for('signup_page')})
+                redirect_url = url_for('signup_page', _external=True)
+                if not redirect_url.startswith('http'):
+                    redirect_url = f"{request.scheme}://{request.host}/"
+                return jsonify({"success": True, "redirect_url": redirect_url})
         else:
             email = request.form.get("email")
             password = request.form.get("password")
