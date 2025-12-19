@@ -55,9 +55,22 @@ app.secret_key = SECRET_KEY
 def initialize_database():
     """Initialize database tables - called on app startup"""
     with app.app_context():
+        # First, test database connection
+        try:
+            print("Testing database connection...")
+            db.engine.connect()
+            print("✓ Database connection successful")
+        except Exception as conn_error:
+            print(f"✗ Database connection failed: {conn_error}")
+            print("⚠ Cannot create tables without database connection")
+            return False
+        
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                print(f"Attempting to create database tables (attempt {attempt + 1}/{max_retries})...")
+                print(f"  Database URL: {sqlalchemy_db_url[:50]}...")  # Show first 50 chars
+                
                 # Create all tables defined by SQLAlchemy models
                 db.create_all()
                 print("✓ Database tables initialized successfully!")
@@ -66,23 +79,62 @@ def initialize_database():
                 from sqlalchemy import inspect
                 inspector = inspect(db.engine)
                 tables = inspector.get_table_names()
+                print(f"  Found tables: {tables}")
+                
                 if 'new_user_creds' in tables:
                     print("✓ Verified 'new_user_creds' table exists")
                     return True
                 else:
                     print(f"⚠ Warning: 'new_user_creds' table not found after creation (attempt {attempt + 1}/{max_retries})")
                     print(f"  Available tables: {tables}")
+                    
+                    # Try to create table manually using raw SQL as fallback
+                    if attempt == max_retries - 1:
+                        print("  Attempting to create table manually using raw SQL...")
+                        try:
+                            from sqlalchemy import text
+                            # Drop table if exists (for testing)
+                            # db.session.execute(text("DROP TABLE IF EXISTS new_user_creds"))
+                            # db.session.commit()
+                            
+                            create_table_sql = text("""
+                                CREATE TABLE IF NOT EXISTS new_user_creds (
+                                    "sNo" SERIAL PRIMARY KEY,
+                                    name VARCHAR(200) NOT NULL,
+                                    email VARCHAR(200) UNIQUE NOT NULL,
+                                    password VARCHAR(200),
+                                    google_id VARCHAR(200) UNIQUE
+                                )
+                            """)
+                            db.session.execute(create_table_sql)
+                            db.session.commit()
+                            print("✓ Executed manual CREATE TABLE statement")
+                            
+                            # Verify again
+                            inspector = inspect(db.engine)
+                            tables = inspector.get_table_names()
+                            print(f"  Tables after manual creation: {tables}")
+                            if 'new_user_creds' in tables:
+                                print("✓ Verified 'new_user_creds' table exists after manual creation")
+                                return True
+                            else:
+                                print("✗ Table still not found after manual creation")
+                        except Exception as manual_error:
+                            print(f"✗ Failed to create table manually: {manual_error}")
+                            import traceback
+                            traceback.print_exc()
+                    
                     if attempt < max_retries - 1:
                         import time
-                        time.sleep(1)  # Wait 1 second before retry
+                        time.sleep(2)  # Wait 2 seconds before retry
             except Exception as e:
                 print(f"✗ Error initializing database tables (attempt {attempt + 1}/{max_retries}): {e}")
+                import traceback
+                traceback.print_exc()
                 if attempt < max_retries - 1:
                     import time
-                    time.sleep(1)  # Wait 1 second before retry
+                    time.sleep(2)  # Wait 2 seconds before retry
                 else:
-                    import traceback
-                    traceback.print_exc()
                     print("⚠ Failed to initialize database tables after retries. App will continue but may have issues.")
         return False
 
