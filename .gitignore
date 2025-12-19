@@ -1,0 +1,12 @@
+.env
+venv/
+__pycache__
+.idea/
+/extra_files/
+/flash-codes/
+/output_photos/
+.free_setup.md
+.quick_start.md
+.setup_guide.md
+.env_template.txt
+/basic_codes/
