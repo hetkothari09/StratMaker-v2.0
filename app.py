@@ -50,6 +50,17 @@ bcrypt = Bcrypt(app)
 SECRET_KEY = os.getenv("SECRET_KEY", "many random bytes")
 app.secret_key = SECRET_KEY
 
+# Initialize database tables on app startup (critical for production)
+# This ensures tables exist when running with gunicorn
+with app.app_context():
+    try:
+        db.create_all()
+        print("✓ Database tables initialized successfully!")
+    except Exception as e:
+        print(f"✗ Error initializing database tables: {e}")
+        import traceback
+        traceback.print_exc()
+
 
 # Create database if it doesn't exist (for local PostgreSQL only)
 def create_database_if_not_exists():
@@ -174,9 +185,14 @@ def signup_page():
 
             # Check for existing email
             if cursor:
-                cursor.execute('SELECT email FROM public.new_user_creds WHERE email = %s', (email,))
-                existing_email = cursor.fetchone()
+                try:
+                    cursor.execute('SELECT email FROM public.new_user_creds WHERE email = %s', (email,))
+                    existing_email = cursor.fetchone()
+                except Exception as e:
+                    print(f"Database query error: {e}")
+                    return jsonify({"success": False, "error": f"Database error: {str(e)}"})
             else:
+                print("✗ Database cursor is None - connection failed")
                 flash('Database connection error. Please check PostgreSQL setup.', 'error')
                 return jsonify({"success": False, "error": "Database not available"})
 
@@ -201,9 +217,15 @@ def signup_page():
 
             # Check for existing email
             if cursor:
-                cursor.execute("SELECT email FROM public.new_user_creds WHERE email = %s", (email,))
-                existing_email = cursor.fetchone()
+                try:
+                    cursor.execute("SELECT email FROM public.new_user_creds WHERE email = %s", (email,))
+                    existing_email = cursor.fetchone()
+                except Exception as e:
+                    print(f"Database query error: {e}")
+                    flash(f'Database error: {str(e)}', 'error')
+                    return redirect(url_for('signup_page'))
             else:
+                print("✗ Database cursor is None - connection failed")
                 flash('Database connection error. Please check PostgreSQL setup.', 'error')
                 return redirect(url_for('signup_page'))
             # print(existing_email is not None, existing_email[0], email)
@@ -220,7 +242,7 @@ def signup_page():
                 create_user_table(email)
                 flash('Registered Successfully!', 'success')
                 return redirect(url_for('login_page'))
-    return render_template('signup.html')
+    return render_template('signup.html', google_client_id=google_client_id or '')
 
 
 @app.route("/login", methods=["POST", "GET"])
@@ -253,7 +275,7 @@ def login_page():
             else:
                 flash('Invalid Credentials, Please try again!', 'error')
 
-    return render_template('login.html')
+    return render_template('login.html', google_client_id=google_client_id or '')
 
 
 @app.route("/<username>", methods=['POST', 'GET'])
